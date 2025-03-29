@@ -9,7 +9,32 @@ import plotly.graph_objects as go
 import re
 import calendar
 import os
-import json
+from supabase import create_client
+
+# Conectare Supabase folosind datele din Secrets
+url = st.secrets["supabase"]["url"]
+key = st.secrets["supabase"]["key"]
+supabase = create_client(url, key)
+
+# Funcție pentru încărcarea istoricului din Supabase
+def load_historical_data(table_name="prezenta_angajati"):
+    response = supabase.table(table_name).select("*").execute()
+    return pd.DataFrame(response.data)
+
+# Funcție pentru salvarea datelor în Supabase
+def save_to_historical_data(new_data, table_name="prezenta_angajati"):
+    data = new_data.to_dict(orient="records")
+    response = supabase.table(table_name).upsert(data).execute()
+    return pd.DataFrame(response.data)
+
+# Restul codului tău existent rămâne neschimbat...
+
+# Înlocuiește apelurile funcțiilor existente din aplicație cu cele noi de mai sus:
+# historical_df = load_historical_data()  # încarcă date istorice
+# updated_history = save_to_historical_data(daily_df)  # salvează date noi
+
+# Poți continua cu codul existent al aplicației tale de aici.
+
 
 st.set_page_config(page_title="Analizor Prezență Angajați", layout="wide")
 
