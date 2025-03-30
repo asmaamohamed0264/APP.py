@@ -119,7 +119,7 @@ def convert_date_string(date_str, year=None):
     date_str = date_str.strip()
     
     # Try different date formats
-    formats = ['%d %B %Y', '%d %B']
+    formats = ['%d %B %Y', '%d %B', '%d-%m-%Y', '%d/%m/%Y', '%Y-%m-%d']
     
     for fmt in formats:
         try:
@@ -198,58 +198,76 @@ def get_excel_download_link(df, filename, link_text):
         st.warning(f"Nu s-a putut crea link-ul de descărcare Excel: {e}")
         return ""
 
-# Custom CSS
-st.markdown("""
-<style>
-    .main { padding: 2rem; }
-    .download-link {
-        background-color: #4CAF50;
-        color: white;
-        padding: 10px 15px;
-        text-align: center;
-        text-decoration: none;
-        display: inline-block;
-        font-size: 16px;
-        margin: 4px 2px;
-        cursor: pointer;
-        border-radius: 5px;
-    }
-    .highlight-positive { color: green; font-weight: bold; }
-    .highlight-negative { color: red; font-weight: bold; }
-    .absent-row { background-color: #fff3f3; }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 1px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: white;
-        border-radius: 4px 4px 0 0;
-        gap: 1px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #f0f0f0;
-        border-bottom: 2px solid #4CAF50;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Helper function to process employee data entries (removes duplication)
+def process_employee_entry(current_employee, department, badge_id, weekdays, dates, time_range, report_year):
+    data_entries = []
+    
+    for day_idx, (day, date_str, time_range_val) in enumerate(zip(weekdays, dates, time_range)):
+        if date_str:  # Check if date exists
+            date_obj = convert_date_string(date_str, report_year)
+            weekday_name = day
+            
+            if time_range_val and '-' in time_range_val:
+                entry_time_str, exit_time_str = time_range_val.split(' - ')
+                entry_time = parse_time(entry_time_str)
+                exit_time = parse_time(exit_time_str)
+                
+                if entry_time and exit_time:
+                    duration = calculate_duration(entry_time, exit_time)
+                    standard_duration = 0
+                    
+                    # Calculate standard hours based on weekday
+                    if weekday_name in ['Mon', 'Tue', 'Wed', 'Thu']:
+                        standard_duration = 8.5
+                    elif weekday_name == 'Fri':
+                        standard_duration = 6.0
+                    
+                    # Check if it's a holiday
+                    if date_obj and is_holiday(date_obj):
+                        standard_duration = 0
+                    
+                    data_entries.append({
+                        'Angajat': current_employee,
+                        'Departament': department,
+                        'ID Legitimație': badge_id,
+                        'Zi': weekday_name,
+                        'Data': date_str,
+                        'Data_Obiect': date_obj,
+                        'Ora Sosire': entry_time_str,
+                        'Ora Plecare': exit_time_str,
+                        'Durata (Ore)': duration,
+                        'Ore Standard': standard_duration,
+                        'Diferență': duration - standard_duration
+                    })
+            else:
+                # Date exists but no time range (absent day)
+                standard_duration = 0
+                if weekday_name in ['Mon', 'Tue', 'Wed', 'Thu']:
+                    standard_duration = 8.5
+                elif weekday_name == 'Fri':
+                    standard_duration = 6.0
+                
+                # Check if it's a holiday
+                if date_obj and is_holiday(date_obj):
+                    standard_duration = 0
+                
+                data_entries.append({
+                    'Angajat': current_employee,
+                    'Departament': department,
+                    'ID Legitimație': badge_id,
+                    'Zi': weekday_name,
+                    'Data': date_str,
+                    'Data_Obiect': date_obj,
+                    'Ora Sosire': '',
+                    'Ora Plecare': '',
+                    'Durata (Ore)': 0,
+                    'Ore Standard': standard_duration,
+                    'Diferență': -standard_duration
+                })
+    
+    return data_entries
 
-# App header
-st.title("📊 Analizor Prezență Angajați")
-st.markdown("Încărcați datele de prezență și obțineți o analiză completă")
-
-# File upload section
-st.markdown("### Încărcați Datele de Prezență")
-uploaded_file = st.file_uploader("Alegeți un fișier", type=['xlsx', 'csv'])
-
-# Load historical data
-historical_df = load_historical_data()
-
-if not historical_df.empty:
-    st.info(f"📊 Istoric disponibil: {len(historical_df)} înregistrări")
-
+# Function to process attendance data
 def process_attendance_data(file_content):
     try:
         # Read CSV content
@@ -288,68 +306,8 @@ def process_attendance_data(file_content):
             if employee_match:
                 # Process previous employee data if it exists
                 if current_employee and days_data:
-                    for day_idx, (day, date_str, time_range) in enumerate(zip(weekdays, dates, days_data)):
-                        if date_str:  # Check if date exists
-                            date_obj = convert_date_string(date_str, report_year)
-                            weekday_name = day
-                            
-                            if time_range and '-' in time_range:
-                                entry_time_str, exit_time_str = time_range.split(' - ')
-                                entry_time = parse_time(entry_time_str)
-                                exit_time = parse_time(exit_time_str)
-                                
-                                if entry_time and exit_time:
-                                    duration = calculate_duration(entry_time, exit_time)
-                                    standard_duration = 0
-                                    
-                                    # Calculate standard hours based on weekday
-                                    if weekday_name in ['Mon', 'Tue', 'Wed', 'Thu']:
-                                        standard_duration = 8.5
-                                    elif weekday_name == 'Fri':
-                                        standard_duration = 6.0
-                                    
-                                    # Check if it's a holiday
-                                    if date_obj and is_holiday(date_obj):
-                                        standard_duration = 0
-                                    
-                                    data.append({
-                                        'Angajat': current_employee,
-                                        'Departament': department,
-                                        'ID Legitimație': badge_id,
-                                        'Zi': weekday_name,
-                                        'Data': date_str,
-                                        'Data_Obiect': date_obj,
-                                        'Ora Sosire': entry_time_str,
-                                        'Ora Plecare': exit_time_str,
-                                        'Durata (Ore)': duration,
-                                        'Ore Standard': standard_duration,
-                                        'Diferență': duration - standard_duration
-                                    })
-                            else:
-                                # Date exists but no time range (absent day)
-                                standard_duration = 0
-                                if weekday_name in ['Mon', 'Tue', 'Wed', 'Thu']:
-                                    standard_duration = 8.5
-                                elif weekday_name == 'Fri':
-                                    standard_duration = 6.0
-                                
-                                # Check if it's a holiday
-                                if date_obj and is_holiday(date_obj):
-                                    standard_duration = 0
-                                
-                                data.append({
-                                    'Angajat': current_employee,
-                                    'Departament': department,
-                                    'ID Legitimație': badge_id,
-                                    'Zi': weekday_name,
-                                    'Data': date_str,
-                                    'Data_Obiect': date_obj,
-                                    'Ora Sosire': '',
-                                    'Ora Plecare': '',
-                                    'Durata (Ore)': 0,
-                                    'Ore Standard': standard_duration,
-                                    'Diferență': -standard_duration
-                                })
+                    data_entries = process_employee_entry(current_employee, department, badge_id, weekdays, dates, days_data, report_year)
+                    data.extend(data_entries)
                 
                 # Set new employee data
                 current_employee = employee_match.group(1).strip()
@@ -387,68 +345,8 @@ def process_attendance_data(file_content):
                 
                 # Process current employee data
                 if current_employee and days_data:
-                    for day_idx, (day, date_str, time_range) in enumerate(zip(weekdays, dates, days_data)):
-                        if date_str:  # Check if date exists
-                            date_obj = convert_date_string(date_str, report_year)
-                            weekday_name = day
-                            
-                            if time_range and '-' in time_range:
-                                entry_time_str, exit_time_str = time_range.split(' - ')
-                                entry_time = parse_time(entry_time_str)
-                                exit_time = parse_time(exit_time_str)
-                                
-                                if entry_time and exit_time:
-                                    duration = calculate_duration(entry_time, exit_time)
-                                    standard_duration = 0
-                                    
-                                    # Calculate standard hours based on weekday
-                                    if weekday_name in ['Mon', 'Tue', 'Wed', 'Thu']:
-                                        standard_duration = 8.5
-                                    elif weekday_name == 'Fri':
-                                        standard_duration = 6.0
-                                    
-                                    # Check if it's a holiday
-                                    if date_obj and is_holiday(date_obj):
-                                        standard_duration = 0
-                                    
-                                    data.append({
-                                        'Angajat': current_employee,
-                                        'Departament': department,
-                                        'ID Legitimație': badge_id,
-                                        'Zi': weekday_name,
-                                        'Data': date_str,
-                                        'Data_Obiect': date_obj,
-                                        'Ora Sosire': entry_time_str,
-                                        'Ora Plecare': exit_time_str,
-                                        'Durata (Ore)': duration,
-                                        'Ore Standard': standard_duration,
-                                        'Diferență': duration - standard_duration
-                                    })
-                            else:
-                                # Date exists but no time range (absent day)
-                                standard_duration = 0
-                                if weekday_name in ['Mon', 'Tue', 'Wed', 'Thu']:
-                                    standard_duration = 8.5
-                                elif weekday_name == 'Fri':
-                                    standard_duration = 6.0
-                                
-                                # Check if it's a holiday
-                                if date_obj and is_holiday(date_obj):
-                                    standard_duration = 0
-                                
-                                data.append({
-                                    'Angajat': current_employee,
-                                    'Departament': department,
-                                    'ID Legitimație': badge_id,
-                                    'Zi': weekday_name,
-                                    'Data': date_str,
-                                    'Data_Obiect': date_obj,
-                                    'Ora Sosire': '',
-                                    'Ora Plecare': '',
-                                    'Durata (Ore)': 0,
-                                    'Ore Standard': standard_duration,
-                                    'Diferență': -standard_duration
-                                })
+                    data_entries = process_employee_entry(current_employee, department, badge_id, weekdays, dates, days_data, report_year)
+                    data.extend(data_entries)
                 
                 days_data = []
                 continue
@@ -597,6 +495,71 @@ def process_attendance_data(file_content):
         st.exception(e)
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "N/A", datetime.now().year
 
+# Custom CSS
+st.markdown("""
+<style>
+    .main { padding: 2rem; }
+    .download-link {
+        background-color: #4CAF50;
+        color: white;
+        padding: 10px 15px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 5px;
+        transition: background-color 0.3s;
+    }
+    .download-link:hover {
+        background-color: #45a049;
+    }
+    .highlight-positive { color: green; font-weight: bold; }
+    .highlight-negative { color: red; font-weight: bold; }
+    .absent-row { background-color: #fff3f3; }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 1px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: white;
+        border-radius: 4px 4px 0 0;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #f0f0f0;
+        border-bottom: 2px solid #4CAF50;
+    }
+    .stSelectbox {
+        margin-bottom: 10px;
+    }
+    .stMetric {
+        background-color: #f9f9f9;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# App header
+st.title("📊 Analizor Prezență Angajați")
+st.markdown("Încărcați datele de prezență și obțineți o analiză completă")
+
+# File upload section
+st.markdown("### Încărcați Datele de Prezență")
+uploaded_file = st.file_uploader("Alegeți un fișier", type=['xlsx', 'csv'])
+
+# Load historical data
+historical_df = load_historical_data()
+
+if not historical_df.empty:
+    st.info(f"📊 Istoric disponibil: {len(historical_df)} înregistrări")
+
 # Main application logic
 if uploaded_file is not None:
     try:
@@ -620,9 +583,21 @@ if uploaded_file is not None:
             
             st.success(f"✅ Date procesate cu succes! Interval de date: {date_range}")
             
+            # Add rounding percentage selector
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                rounding_percentage = st.selectbox(
+                    "Procent rotunjire ore lucrate (>0)",
+                    [0, 10, 15, 20],
+                    key="rounding_percentage"
+                )
+            with col2:
+                if rounding_percentage > 0:
+                    st.info(f"Valorile pozitive din coloana 'Durata (Ore)' vor fi rotunjite în sus cu {rounding_percentage}%")
+            
             # Create tabs for different views
             tab1, tab2, tab3, tab4 = st.tabs(["📋 Analiză Zilnică", "📅 Sumar Săptămânal", "📆 Prezentare Lunară", "📊 Vizualizări"])
-            
+
             with tab1:
                 st.markdown("### Înregistrări Zilnice de Prezență")
                 
@@ -640,6 +615,18 @@ if uploaded_file is not None:
                 
                 # Display the DataFrame
                 if not filtered_df.empty:
+                    # Create copy for display, dropping unwanted columns
+                    display_df = filtered_df.drop(columns=['Departament', 'ID Legitimație'])
+                    
+                    # Apply rounding if selected
+                    if rounding_percentage > 0:
+                        display_df['Durata (Ore)'] = display_df.apply(
+                            lambda row: round(row['Durata (Ore)'] * (1 + rounding_percentage/100), 2) if row['Durata (Ore)'] > 0 else row['Durata (Ore)'], 
+                            axis=1
+                        )
+                        # Recalculate difference
+                        display_df['Diferență'] = display_df['Durata (Ore)'] - display_df['Ore Standard']
+                                    
                     # Highlight differences
                     def highlight_difference(row):
                         if pd.isna(row['Ora Sosire']) or row['Ora Sosire'] == '':
@@ -649,16 +636,16 @@ if uploaded_file is not None:
                         elif row['Diferență'] < 0:
                             return ['background-color: #ffc7ce; color: #9c0006' if col == 'Diferență' else '' for col in row.index]
                         return [''] * len(row)
-                    
-                    styled_df = filtered_df.style.apply(highlight_difference, axis=1)
-                    
+                                    
+                    styled_df = display_df.style.apply(highlight_difference, axis=1)
+                                    
                     st.dataframe(styled_df, use_container_width=True)
                     
                     # Summary for displayed data
-                    total_presence = filtered_df['Durata (Ore)'].sum()
-                    total_standard = filtered_df['Ore Standard'].sum()
+                    total_presence = display_df['Durata (Ore)'].sum()
+                    total_standard = display_df['Ore Standard'].sum()
                     total_difference = total_presence - total_standard
-                    
+                                    
                     # Metrics
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -668,21 +655,20 @@ if uploaded_file is not None:
                     with col3:
                         st.metric("Diferență", f"{total_difference:.2f}", 
                                 delta=f"{(total_difference/total_standard*100):.1f}%" if total_standard > 0 else None)
-                else:
-                    st.info("Nu există date de afișat pentru selecția curentă.")
-                
-                # Download links
-                if not filtered_df.empty:
+                    
+                    # Download links
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.markdown(get_download_link(filtered_df, "prezenta_zilnica.csv", "📥 Descărcați Date Zilnice (CSV)"), unsafe_allow_html=True)
+                        st.markdown(get_download_link(filtered_df, "prezenta_zilnica_original.csv", "📥 Descărcați Date Originale (CSV)"), unsafe_allow_html=True)
                     with col2:
-                        st.markdown(get_excel_download_link(filtered_df, "prezenta_zilnica.xlsx", "📥 Descărcați Date Zilnice (Excel)"), unsafe_allow_html=True)
-            
+                        st.markdown(get_excel_download_link(display_df, "prezenta_zilnica_afisate.xlsx", "📥 Descărcați Date Afișate (Excel)"), unsafe_allow_html=True)
+                else:
+                    st.info("Nu există date de afișat pentru selecția curentă.")
+
             with tab2:
                 st.markdown("### Sumar Săptămânal")
                 
-               # Filter by employee
+                # Filter by employee
                 if 'Angajat' in weekly_df.columns:
                     weekly_employees = sorted(weekly_df['Angajat'].unique())
                     selected_weekly_employee = st.selectbox("Selectați Angajatul", ['Toți'] + list(weekly_employees), key="weekly_employee")
@@ -696,6 +682,17 @@ if uploaded_file is not None:
                 
                 # Display the DataFrame
                 if not filtered_weekly_df.empty:
+                    # Create copy for display, dropping unwanted columns
+                    display_weekly_df = filtered_weekly_df.drop(columns=['Departament'])
+                    
+                    # Apply rounding if selected
+                    if rounding_percentage > 0:
+                        display_weekly_df['Ore Totale'] = display_weekly_df['Ore Totale'].apply(
+                            lambda x: round(x * (1 + rounding_percentage/100), 2) if x > 0 else x
+                        )
+                        # Recalculate difference
+                        display_weekly_df['Diferență'] = display_weekly_df['Ore Totale'] - display_weekly_df['Ore Standard']
+                    
                     # Format the DataFrame for display
                     def highlight_weekly_diff(row):
                         if row['Diferență'] > 0:
@@ -704,13 +701,13 @@ if uploaded_file is not None:
                             return ['background-color: #ffc7ce; color: #9c0006' if col == 'Diferență' else '' for col in row.index]
                         return [''] * len(row)
                     
-                    styled_weekly_df = filtered_weekly_df.style.apply(highlight_weekly_diff, axis=1)
+                    styled_weekly_df = display_weekly_df.style.apply(highlight_weekly_diff, axis=1)
                     
                     st.dataframe(styled_weekly_df, use_container_width=True)
                     
                     # Weekly metrics
-                    week_total_hours = filtered_weekly_df['Ore Totale'].sum()
-                    week_standard_hours = filtered_weekly_df['Ore Standard'].sum()
+                    week_total_hours = display_weekly_df['Ore Totale'].sum()
+                    week_standard_hours = display_weekly_df['Ore Standard'].sum()
                     week_diff = week_total_hours - week_standard_hours
                     
                     col1, col2, col3 = st.columns(3)
@@ -725,12 +722,12 @@ if uploaded_file is not None:
                     # Download links
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.markdown(get_download_link(filtered_weekly_df, "prezenta_saptamanala.csv", "📥 Descărcați Date Săptămânale (CSV)"), unsafe_allow_html=True)
+                        st.markdown(get_download_link(filtered_weekly_df, "prezenta_saptamanala_original.csv", "📥 Descărcați Date Originale (CSV)"), unsafe_allow_html=True)
                     with col2:
-                        st.markdown(get_excel_download_link(filtered_weekly_df, "prezenta_saptamanala.xlsx", "📥 Descărcați Date Săptămânale (Excel)"), unsafe_allow_html=True)
+                        st.markdown(get_excel_download_link(display_weekly_df, "prezenta_saptamanala_afisate.xlsx", "📥 Descărcați Date Afișate (Excel)"), unsafe_allow_html=True)
                 else:
                     st.info("Nu există date săptămânale de afișat pentru selecția curentă.")
-            
+
             with tab3:
                 st.markdown("### Prezentare Lunară")
                 
@@ -747,6 +744,17 @@ if uploaded_file is not None:
                     filtered_monthly_df = monthly_df
                 
                 if not filtered_monthly_df.empty:
+                    # Create copy for display, dropping unwanted columns
+                    display_monthly_df = filtered_monthly_df.drop(columns=['Departament'])
+                    
+                    # Apply rounding if selected
+                    if rounding_percentage > 0:
+                        display_monthly_df['Ore Totale'] = display_monthly_df['Ore Totale'].apply(
+                            lambda x: round(x * (1 + rounding_percentage/100), 2) if x > 0 else x
+                        )
+                        # Recalculate difference
+                        display_monthly_df['Diferență'] = display_monthly_df['Ore Totale'] - display_monthly_df['Ore Standard']
+                    
                     # Format the DataFrame for display
                     def highlight_monthly_diff(row):
                         if row['Diferență'] > 0:
@@ -755,7 +763,7 @@ if uploaded_file is not None:
                             return ['background-color: #ffc7ce; color: #9c0006' if col == 'Diferență' else '' for col in row.index]
                         return [''] * len(row)
                     
-                    styled_monthly_df = filtered_monthly_df.style.apply(highlight_monthly_diff, axis=1)
+                    styled_monthly_df = display_monthly_df.style.apply(highlight_monthly_diff, axis=1)
                     
                     st.dataframe(styled_monthly_df, use_container_width=True)
                     
@@ -805,9 +813,9 @@ if uploaded_file is not None:
                                     st.metric("Sărbători Legale", holiday_count)
                                 
                                 # Detailed employee information for the selected month
-                                month_data = filtered_monthly_df[
-                                    (filtered_monthly_df['Luna'] == month_num) & 
-                                    (filtered_monthly_df['An'] == selected_year)
+                                month_data = display_monthly_df[
+                                    (display_monthly_df['Luna'] == month_num) & 
+                                    (display_monthly_df['An'] == selected_year)
                                 ]
                                 
                                 if not month_data.empty:
@@ -828,12 +836,12 @@ if uploaded_file is not None:
                     # Download links
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.markdown(get_download_link(filtered_monthly_df, "prezenta_lunara.csv", "📥 Descărcați Date Lunare (CSV)"), unsafe_allow_html=True)
+                        st.markdown(get_download_link(filtered_monthly_df, "prezenta_lunara_original.csv", "📥 Descărcați Date Originale (CSV)"), unsafe_allow_html=True)
                     with col2:
-                        st.markdown(get_excel_download_link(filtered_monthly_df, "prezenta_lunara.xlsx", "📥 Descărcați Date Lunare (Excel)"), unsafe_allow_html=True)
+                        st.markdown(get_excel_download_link(display_monthly_df, "prezenta_lunara_afisate.xlsx", "📥 Descărcați Date Afișate (Excel)"), unsafe_allow_html=True)
                 else:
                     st.info("Nu există date lunare de afișat pentru selecția curentă.")
-            
+
             with tab4:
                 st.markdown("### Vizualizări")
                 
@@ -850,6 +858,14 @@ if uploaded_file is not None:
                     else:
                         filtered_viz_df = daily_df
                     
+                    # Apply rounding for visualization if selected
+                    viz_df = filtered_viz_df.copy()
+                    if rounding_percentage > 0:
+                        viz_df['Durata (Ore)'] = viz_df.apply(
+                            lambda row: round(row['Durata (Ore)'] * (1 + rounding_percentage/100), 2) if row['Durata (Ore)'] > 0 else row['Durata (Ore)'],
+                            axis=1
+                        )
+                    
                     # Select visualization type
                     viz_type = st.selectbox(
                         "Selectați Vizualizarea", 
@@ -860,14 +876,14 @@ if uploaded_file is not None:
                         if viz_type == "Ore Zilnice per Angajat":
                             # If filtering by employee, show day by day data
                             if selected_viz_employee != 'Toți':
-                                daily_emp_df = filtered_viz_df.groupby('Data')['Durata (Ore)'].sum().reset_index()
-                                daily_std_df = filtered_viz_df.groupby('Data')['Ore Standard'].sum().reset_index()
+                                daily_emp_df = viz_df.groupby('Data')['Durata (Ore)'].sum().reset_index()
+                                daily_std_df = viz_df.groupby('Data')['Ore Standard'].sum().reset_index()
                                 
                                 daily_merged = pd.merge(daily_emp_df, daily_std_df, on='Data')
                                 
                                 # Sort by date if available
-                                if 'Data_Obiect' in filtered_viz_df.columns:
-                                    date_mapping = dict(zip(filtered_viz_df['Data'], filtered_viz_df['Data_Obiect']))
+                                if 'Data_Obiect' in viz_df.columns:
+                                    date_mapping = dict(zip(viz_df['Data'], viz_df['Data_Obiect']))
                                     daily_merged['Data_Obiect'] = daily_merged['Data'].map(date_mapping)
                                     daily_merged = daily_merged.sort_values('Data_Obiect')
                                 
@@ -878,13 +894,14 @@ if uploaded_file is not None:
                                     barmode='group',
                                     title=f"Ore Zilnice Lucrate: {selected_viz_employee}",
                                     labels={"value": "Ore", "Data": "Data", "variable": "Tip"},
-                                    height=500
+                                    height=500,
+                                    color_discrete_map={'Durata (Ore)': '#4CAF50', 'Ore Standard': '#2196F3'}
                                 )
                                 
                                 st.plotly_chart(fig, use_container_width=True)
                             else:
                                 # Group by employee and date
-                                pivot_df = filtered_viz_df.pivot_table(
+                                pivot_df = viz_df.pivot_table(
                                     index='Data', 
                                     columns='Angajat', 
                                     values='Durata (Ore)',
@@ -893,7 +910,7 @@ if uploaded_file is not None:
                                 
                                 # Sort pivot table by date if possible
                                 date_obj_map = {}
-                                for date_str, date_obj in zip(filtered_viz_df['Data'], filtered_viz_df['Data_Obiect']):
+                                for date_str, date_obj in zip(viz_df['Data'], viz_df['Data_Obiect']):
                                     if date_str not in date_obj_map and date_obj is not None:
                                         date_obj_map[date_str] = date_obj
                                 
@@ -920,22 +937,31 @@ if uploaded_file is not None:
                                 filtered_weekly_viz = weekly_df
                             
                             if not filtered_weekly_viz.empty:
+                                # Apply rounding if selected
+                                weekly_viz_df = filtered_weekly_viz.copy()
+                                if rounding_percentage > 0:
+                                    weekly_viz_df['Ore Totale'] = weekly_viz_df['Ore Totale'].apply(
+                                        lambda x: round(x * (1 + rounding_percentage/100), 2) if x > 0 else x
+                                    )
+                                    weekly_viz_df['Diferență'] = weekly_viz_df['Ore Totale'] - weekly_viz_df['Ore Standard']
+                                
                                 # Create comparison chart
                                 weekly_comp_fig = px.bar(
-                                    filtered_weekly_viz,
+                                    weekly_viz_df,
                                     x='Angajat' if selected_viz_employee == 'Toți' else 'Interval',
                                     y=['Ore Totale', 'Ore Standard'],
                                     barmode='group',
                                     title="Ore Săptămânale: Efectiv vs. Standard",
                                     labels={"value": "Ore", "variable": "Categorie"},
-                                    height=500
+                                    height=500,
+                                    color_discrete_map={'Ore Totale': '#4CAF50', 'Ore Standard': '#2196F3'}
                                 )
                                 
                                 st.plotly_chart(weekly_comp_fig, use_container_width=True)
                                 
                                 # Create difference chart
                                 weekly_diff_fig = px.bar(
-                                    filtered_weekly_viz,
+                                    weekly_viz_df,
                                     x='Angajat' if selected_viz_employee == 'Toți' else 'Interval',
                                     y='Diferență',
                                     title="Diferența de Ore față de Programul Standard",
@@ -953,7 +979,7 @@ if uploaded_file is not None:
                             
                         elif viz_type == "Distribuția Orelor de Sosire":
                             # Convert time strings to numeric for visualization
-                            arrival_df = filtered_viz_df.copy()
+                            arrival_df = viz_df.copy()
                             arrival_df['Ora Sosire (Numeric)'] = arrival_df['Ora Sosire'].apply(
                                 lambda x: int(x.split(':')[0]) + int(x.split(':')[1])/60 if isinstance(x, str) and ':' in x else None
                             )
@@ -971,7 +997,8 @@ if uploaded_file is not None:
                                         range_x=[6, 12],  # Focus on 6 AM to 12 PM
                                         title=f"Distribuția Orelor de Sosire pentru {selected_viz_employee}",
                                         labels={"Ora Sosire (Numeric)": "Ora Zilei", "count": "Frecvență"},
-                                        height=500
+                                        height=500,
+                                        color_discrete_sequence=['#2196F3']
                                     )
                                 else:
                                     arrival_fig = px.histogram(
@@ -994,7 +1021,7 @@ if uploaded_file is not None:
                             
                         elif viz_type == "Distribuția Orelor de Plecare":
                             # Convert time strings to numeric for visualization
-                            departure_df = filtered_viz_df.copy()
+                            departure_df = viz_df.copy()
                             departure_df['Ora Plecare (Numeric)'] = departure_df['Ora Plecare'].apply(
                                 lambda x: int(x.split(':')[0]) + int(x.split(':')[1])/60 if isinstance(x, str) and ':' in x else None
                             )
@@ -1012,7 +1039,8 @@ if uploaded_file is not None:
                                         range_x=[14, 20],  # Focus on 2 PM to 8 PM
                                         title=f"Distribuția Orelor de Plecare pentru {selected_viz_employee}",
                                         labels={"Ora Plecare (Numeric)": "Ora Zilei", "count": "Frecvență"},
-                                        height=500
+                                        height=500,
+                                        color_discrete_sequence=['#4CAF50']
                                     )
                                 else:
                                     departure_fig = px.histogram(
@@ -1036,7 +1064,7 @@ if uploaded_file is not None:
                                 
                         elif viz_type == "Prezența Zilnică":
                             # Create daily presence chart
-                            presence_df = filtered_viz_df.copy()
+                            presence_df = viz_df.copy()
                             
                             # Add status column (present/absent)
                             presence_df['Status'] = presence_df['Durata (Ore)'].apply(
@@ -1094,8 +1122,8 @@ if uploaded_file is not None:
                                         daily_std = presence_df.groupby('Data')['Ore Standard'].sum().reset_index()
                                     else:
                                         # For all employees
-                                        daily_presence = filtered_viz_df.groupby('Data')['Durata (Ore)'].sum().reset_index()
-                                        daily_std = filtered_viz_df.groupby('Data')['Ore Standard'].sum().reset_index()
+                                        daily_presence = viz_df.groupby('Data')['Durata (Ore)'].sum().reset_index()
+                                        daily_std = viz_df.groupby('Data')['Ore Standard'].sum().reset_index()
                                     
                                     daily_combined = pd.merge(daily_presence, daily_std, on='Data', suffixes=('_Actual', '_Standard'))
                                     
@@ -1105,8 +1133,8 @@ if uploaded_file is not None:
 
                                     if not daily_combined_clean.empty:
                                         # Sort by date if possible
-                                        if 'Data_Obiect' in filtered_viz_df.columns:
-                                            date_mapping = dict(zip(filtered_viz_df['Data'], filtered_viz_df['Data_Obiect']))
+                                        if 'Data_Obiect' in viz_df.columns:
+                                            date_mapping = dict(zip(viz_df['Data'], viz_df['Data_Obiect']))
                                             daily_combined_clean['Data_Obiect'] = daily_combined_clean['Data'].map(date_mapping)
                                             daily_combined_clean = daily_combined_clean.sort_values('Data_Obiect')
                                         
@@ -1117,8 +1145,10 @@ if uploaded_file is not None:
                                             barmode='group',
                                             title="Ore Lucrate vs. Standard pe Zile",
                                             labels={"value": "Ore", "variable": "Tip"},
-                                            height=400
+                                            height=400,
+                                            color_discrete_map={'Durata (Ore)_Actual': '#4CAF50', 'Ore Standard_Standard': '#2196F3'}
                                         )
+                                        
                                         st.plotly_chart(daily_bar, use_container_width=True)
                                     else:
                                         st.warning("⚠️ Nu există suficiente date valide pentru generarea graficului zilnic.")
@@ -1246,5 +1276,5 @@ with st.expander("📅 Sărbători Legale"):
 
 # Application footer
 st.markdown("---")
-st.markdown("### 📊 Analizor Prezență Angajați v2.0")
-st.markdown("Dezvoltat pentru monitorizarea și analiza prezenței angajaților")
+st.markdown("### 📊 Analizor Prezență Angajați v3.0")
+### st.markdown("Dezvoltat pentru monitorizarea și analiza prezenței angajaților")
