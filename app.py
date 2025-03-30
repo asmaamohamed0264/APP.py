@@ -543,6 +543,21 @@ st.markdown("""
         border-radius: 5px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
+        /* Ascunde footer-ul Streamlit */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .viewerBadge_container__1QSob {display: none !important;}
+    .stDeployButton {display:none;}
+    header {visibility: hidden;}
+    .stStatusWidget {visibility: hidden;}
+    
+    /* Pentru versiuni mai noi de Streamlit */
+    .css-eh5xgm.e1ewe7hr3, 
+    .css-cio0dv.e1g8pov61, 
+    .css-z3au9t.egzxvld2,
+    .css-1dp5vir.egzxvld1 {
+        visibility: hidden;
+    }
 </style>
 """, unsafe_allow_html=True)
 
